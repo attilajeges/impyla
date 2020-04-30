@@ -411,7 +411,7 @@ class HiveServer2Cursor(Cursor):
                 if resp.errorMessage:
                     raise OperationalError(resp.errorMessage)
                 else:
-                    if self.fetch_error and self.has_result_set:
+                    if self.fetch_error and self.get_has_result_set(resp):
                         self._last_operation_active=False
                         self._last_operation.fetch()
                     else:
@@ -1183,7 +1183,13 @@ class Operation(ThriftRPC):
 
     @property
     def has_result_set(self):
-        return self.handle.hasResultSet
+        return self.get_has_result_set(self.get_state())
+
+    def get_has_result_set(self, state):
+        if state.hasResultSet is not None:
+            return state.hasResultSet
+        else:
+            return self.handle.hasResultSet
 
     def get_status(self):
         # pylint: disable=protected-access
@@ -1239,7 +1245,7 @@ class Operation(ThriftRPC):
               orientation=TFetchOrientation.FETCH_NEXT,
               convert_types=True):
         if not self.has_result_set:
-            log.debug('fetch_results: operation_handle.hasResultSet=False')
+            log.debug('fetch_results: has_result_set=False')
             return None
 
         # the schema is necessary to pull the proper values (i.e., coalesce)
@@ -1267,8 +1273,8 @@ class Operation(ThriftRPC):
         return _is_columnar_protocol(protocol)
 
     def get_result_schema(self):
-        if not self.handle.hasResultSet:
-            log.debug('get_result_schema: handle.hasResultSet=False')
+        if not self.has_result_set:
+            log.debug('get_result_schema: has_result_set=False')
             return None
 
         req = TGetResultSetMetadataReq(operationHandle=self.handle)
