@@ -411,7 +411,7 @@ class HiveServer2Cursor(Cursor):
                 if resp.errorMessage:
                     raise OperationalError(resp.errorMessage)
                 else:
-                    if self.fetch_error and self.get_has_result_set(resp):
+                    if self.fetch_error and self._last_operation.get_has_result_set(resp):
                         self._last_operation_active=False
                         self._last_operation.fetch()
                     else:
