@@ -315,6 +315,36 @@ def get_socket(host, port, use_ssl, ca_cert):
         return TSocket(host, port)
 
 
+def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=False,
+                                ca_cert=None, krb_host=None, kerberos_service_name=None):
+    # TODO: support timeout
+    if timeout is not None:
+        log.error('get_kerberos_http_transport does not support a timeout')
+    if use_ssl:
+        url = 'https://%s:%s/%s' % (host, port, http_path)
+        log.debug('get_kerberos_http_transport url=%s', url)
+        # TODO(#362): Add server authentication with thrift 0.12.
+        transport = ImpalaHttpClient(url)
+    else:
+        url = 'http://%s:%s/%s' % (host, port, http_path)
+        log.debug('get_kerberos_http_transport url=%s', url)
+        transport = ImpalaHttpClient(url)
+
+    if krb_host:
+       kerberos_host = krb_host
+    else:
+       kerberos_host = host
+
+    import kerberos
+    _, krb_context = kerberos.authGSSClientInit("%s@%s" % (kerberos_service_name, kerberos_host)) 
+    kerberos.authGSSClientStep(krb_context, "")
+
+    negotiate_details = kerberos.authGSSClientResponse(krb_context)
+    headers = {"Authorization": "Negotiate " + negotiate_details}
+
+    transport.setCustomHeaders(headers)
+    return transport
+
 def get_http_transport(host, port, http_path, timeout=None, use_ssl=False,
                        ca_cert=None, auth_mechanism='NOSASL', user=None,
                        password=None):
