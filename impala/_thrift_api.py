@@ -193,6 +193,7 @@ class ImpalaHttpClient(TTransportBase):
     return self.realhost is not None
 
   def open(self):
+    log.debug('ImpalaHttpClient.open %s // %s : %s' % (self.scheme, self.host, self.port))
     if self.scheme == 'http':
       self.__http = http_client.HTTPConnection(self.host, self.port,
                                                timeout=self.__timeout)
@@ -207,6 +208,7 @@ class ImpalaHttpClient(TTransportBase):
                              {"Proxy-Authorization": self.proxy_auth})
 
   def close(self):
+    log.debug("ImpalaHttpClient.close")
     self.__http.close()
     self.__http = None
     self.__http_response = None
@@ -236,6 +238,7 @@ class ImpalaHttpClient(TTransportBase):
     self.__wbuf.write(buf)
 
   def flush(self):
+    log.debug('ImpalaHttpClient.flush')
     if self.isOpen():
       self.close()
     self.open()
@@ -249,8 +252,11 @@ class ImpalaHttpClient(TTransportBase):
       # need full URL of real host for HTTP proxy here (HTTPS uses CONNECT tunnel)
       self.__http.putrequest('POST', "http://%s:%s%s" %
                              (self.realhost, self.realport, self.path))
+      log.debug('ImpalaHttpClient.flush http_request:\nPOST\nhttp://%s:%s%s' %
+                (self.realhost, self.realport, self.path))
     else:
       self.__http.putrequest('POST', self.path)
+      log.debug('ImpalaHttpClient.flush http_request:\nPOST\n%s' % self.path)
 
     # Write headers
     self.__http.putheader('Content-Type', 'application/x-thrift')
@@ -271,6 +277,9 @@ class ImpalaHttpClient(TTransportBase):
         user_agent = '%s (%s)' % (user_agent, urllib.parse.quote(script))
       self.__http.putheader('User-Agent', user_agent)
 
+    # TODO: Just a test
+    set_kerberos_auth_headers(self, 'hive','attilaj-1.attilaj.root.hwx.site')  
+
     if self.__custom_headers:
       for key, val in six.iteritems(self.__custom_headers):
         self.__http.putheader(key, val)
@@ -279,12 +288,15 @@ class ImpalaHttpClient(TTransportBase):
 
     # Write payload
     self.__http.send(data)
+    log.debug('headers:%s' % self.__custom_headers)
 
     # Get reply to flush the request
     self.__http_response = self.__http.getresponse()
     self.code = self.__http_response.status
     self.message = self.__http_response.reason
     self.headers = self.__http_response.msg
+
+    log.debug('ImpalaHttpClient.flush http_response:\ncode:%s\nmessage:%s\nheaders:%s', self.code, self.message, self.headers)
 
     if self.code >= 300:
       # Report any http response code that is not 1XX (informational response) or
@@ -334,7 +346,9 @@ def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=Fal
        kerberos_host = krb_host
     else:
        kerberos_host = host
+    return set_kerberos_auth_headers(transport, kerberos_service_name, kerberos_host)
 
+def set_kerberos_auth_headers(transport, kerberos_service_name, kerberos_host):
     import kerberos
     _, krb_context = kerberos.authGSSClientInit("%s@%s" % (kerberos_service_name, kerberos_host)) 
     kerberos.authGSSClientStep(krb_context, "")
