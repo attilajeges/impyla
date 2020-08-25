@@ -21,12 +21,14 @@
 from __future__ import absolute_import
 
 import base64
+import datetime
 import getpass
 import os
 from io import BytesIO
 
 from six.moves import urllib
 from six.moves import http_client
+from six.moves import http_cookies
 import warnings
 
 import six
@@ -120,7 +122,7 @@ class ImpalaHttpClient(TTransportBase):
   MIN_REQUEST_SIZE_FOR_EXPECT = 1024
 
   def __init__(self, uri_or_host, port=None, path=None, cafile=None, cert_file=None,
-               key_file=None, ssl_context=None):
+               key_file=None, ssl_context=None, auth_cookie_name=None):
     """ImpalaHttpClient supports two different types of construction:
 
     ImpalaHttpClient(host, port, path) - deprecated
@@ -174,11 +176,15 @@ class ImpalaHttpClient(TTransportBase):
       self.proxy_auth = self.basic_proxy_auth_header(parsed)
     else:
       self.realhost = self.realport = self.proxy_auth = None
+    self.__auth_cookie_name = auth_cookie_name
+    self.__auth_cookie = None
+    self.__auth_cookie_expiry = None
     self.__wbuf = BytesIO()
     self.__http = None
     self.__http_response = None
     self.__timeout = None
     self.__custom_headers = None
+    self.__get_custom_headers_func = None
 
   @staticmethod
   def basic_proxy_auth_header(proxy):
@@ -193,6 +199,7 @@ class ImpalaHttpClient(TTransportBase):
     return self.realhost is not None
 
   def open(self):
+    log.debug('ImpalaHttpClient.open %s // %s : %s' % (self.scheme, self.host, self.port))
     if self.scheme == 'http':
       self.__http = http_client.HTTPConnection(self.host, self.port,
                                                timeout=self.__timeout)
@@ -207,6 +214,7 @@ class ImpalaHttpClient(TTransportBase):
                              {"Proxy-Authorization": self.proxy_auth})
 
   def close(self):
+    log.debug("ImpalaHttpClient.close")
     self.__http.close()
     self.__http = None
     self.__http_response = None
@@ -226,6 +234,48 @@ class ImpalaHttpClient(TTransportBase):
   def setCustomHeaders(self, headers):
     self.__custom_headers = headers
 
+  def setGetCustomHeadersFunc(self, func):
+    self.__get_custom_headers_func = func
+
+  def refreshCustomHeaders(self):
+    if self.__get_custom_headers_func:
+      self.__custom_headers = self.__get_custom_headers_func(self.getAuthCookie())
+
+  def setAuthCookie(self):
+    if self.__auth_cookie_name:
+      if 'Set-Cookie' in self.headers:
+        cookies = http_cookies.SimpleCookie()
+        try:
+          cookies.load(self.headers['Set-Cookie'])
+        except:
+          return
+
+        if self.__auth_cookie_name in cookies:
+          c = cookies[self.__auth_cookie_name]
+          path = self.path if self.path.startswith('/') else '/%s' % self.path
+          if 'path' not in c or not c['path'] or c['path'] == '/' or c['path'] == path:
+            self.__auth_cookie = c
+            if 'max-age' not in c or not c['max-age']:
+              self.__auth_cookie_expiry = None
+            else:
+              try:
+                max_age_sec = int(c['max-age'])
+                self.__auth_cookie_expiry = \
+                    datetime.datetime.now() + datetime.timedelta(0, max_age_sec)
+              except:
+                self.__auth_cookie_expiry = None
+          # TODO: implement support for 'Eexpires' cookie attribute as well.
+
+  def getAuthCookie(self):
+    if self.__auth_cookie and self.__auth_cookie_expiry and \
+        self.__auth_cookie_expiry <= datetime.datetime.now():
+      self.__auth_cookie = None
+    return self.__auth_cookie
+
+  def deleteAuthCookie(self):
+    self.__auth_cookie = None
+    self.__auth_cookie_expiry = None
+
   def read(self, sz):
     return self.__http_response.read(sz)
 
@@ -235,56 +285,77 @@ class ImpalaHttpClient(TTransportBase):
   def write(self, buf):
     self.__wbuf.write(buf)
 
-  def flush(self):
-    if self.isOpen():
-      self.close()
-    self.open()
+  def flush(self, retrying=False):
+    def sendRequestRecvResp(data):
+      if self.isOpen():
+        self.close()
+      self.open()
+
+      # HTTP request
+      if self.using_proxy() and self.scheme == "http":
+        # need full URL of real host for HTTP proxy here (HTTPS uses CONNECT tunnel)
+        self.__http.putrequest('POST', "http://%s:%s%s" %
+                               (self.realhost, self.realport, self.path))
+        log.debug('ImpalaHttpClient.flush http_request:\nPOST\nhttp://%s:%s%s' %
+                  (self.realhost, self.realport, self.path))
+      else:
+        self.__http.putrequest('POST', self.path)
+        log.debug('ImpalaHttpClient.flush http_request:\nPOST\n%s' % self.path)
+
+      # Write headers
+      self.__http.putheader('Content-Type', 'application/x-thrift')
+      data_len = len(data)
+      self.__http.putheader('Content-Length', str(data_len))
+      if data_len > ImpalaHttpClient.MIN_REQUEST_SIZE_FOR_EXPECT:
+        # Add the 'Expect' header to large requests. Note that we do not explicitly wait for
+        # the '100 continue' response before sending the data - HTTPConnection simply
+        # ignores these types of responses, but we'll get the right behavior anyways.
+        self.__http.putheader("Expect", "100-continue")
+      if self.using_proxy() and self.scheme == "http" and self.proxy_auth is not None:
+        self.__http.putheader("Proxy-Authorization", self.proxy_auth)
+
+      self.refreshCustomHeaders()
+      if not self.__custom_headers or 'User-Agent' not in self.__custom_headers:
+        user_agent = 'Python/ImpalaHttpClient'
+        script = os.path.basename(sys.argv[0])
+        if script:
+          user_agent = '%s (%s)' % (user_agent, urllib.parse.quote(script))
+        self.__http.putheader('User-Agent', user_agent)
+
+      if self.__custom_headers:
+        for key, val in six.iteritems(self.__custom_headers):
+          self.__http.putheader(key, val)
+
+      self.__http.endheaders()
+
+      # Write payload
+      self.__http.send(data)
+      log.debug('headers:%s\ndata:%s' % (self.__custom_headers, data))
+
+      # Get reply to flush the request
+      self.__http_response = self.__http.getresponse()
+      self.code = self.__http_response.status
+      self.message = self.__http_response.reason
+      self.headers = self.__http_response.msg
+      self.setAuthCookie()
+
+      log.debug('ImpalaHttpClient.flush http_response:\ncode:%s\nmessage:%s\nheaders:%s', self.code, self.message, self.headers)
+
+    log.debug('ImpalaHttpClient.flush')
 
     # Pull data out of buffer
     data = self.__wbuf.getvalue()
     self.__wbuf = BytesIO()
 
-    # HTTP request
-    if self.using_proxy() and self.scheme == "http":
-      # need full URL of real host for HTTP proxy here (HTTPS uses CONNECT tunnel)
-      self.__http.putrequest('POST', "http://%s:%s%s" %
-                             (self.realhost, self.realport, self.path))
-    else:
-      self.__http.putrequest('POST', self.path)
+    sendRequestRecvResp(data)
 
-    # Write headers
-    self.__http.putheader('Content-Type', 'application/x-thrift')
-    data_len = len(data)
-    self.__http.putheader('Content-Length', str(data_len))
-    if data_len > ImpalaHttpClient.MIN_REQUEST_SIZE_FOR_EXPECT:
-      # Add the 'Expect' header to large requests. Note that we do not explicitly wait for
-      # the '100 continue' response before sending the data - HTTPConnection simply
-      # ignores these types of responses, but we'll get the right behavior anyways.
-      self.__http.putheader("Expect", "100-continue")
-    if self.using_proxy() and self.scheme == "http" and self.proxy_auth is not None:
-      self.__http.putheader("Proxy-Authorization", self.proxy_auth)
-
-    if not self.__custom_headers or 'User-Agent' not in self.__custom_headers:
-      user_agent = 'Python/ImpalaHttpClient'
-      script = os.path.basename(sys.argv[0])
-      if script:
-        user_agent = '%s (%s)' % (user_agent, urllib.parse.quote(script))
-      self.__http.putheader('User-Agent', user_agent)
-
-    if self.__custom_headers:
-      for key, val in six.iteritems(self.__custom_headers):
-        self.__http.putheader(key, val)
-
-    self.__http.endheaders()
-
-    # Write payload
-    self.__http.send(data)
-
-    # Get reply to flush the request
-    self.__http_response = self.__http.getresponse()
-    self.code = self.__http_response.status
-    self.message = self.__http_response.reason
-    self.headers = self.__http_response.msg
+    # 401 unauthorized response might mean that we tried cookie-based authentication
+    # with an expired coobkie.
+    # Delete the cookie and try again.
+    if self.code == 401 and self.getAuthCookie() and not retrying:
+      log.debug('Delete auth cookie and then retry')
+      self.deleteAuthCookie()
+      sendRequestRecvResp(data)
 
     if self.code >= 300:
       # Report any http response code that is not 1XX (informational response) or
@@ -314,6 +385,42 @@ def get_socket(host, port, use_ssl, ca_cert):
     else:
         return TSocket(host, port)
 
+
+def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=False,
+                                ca_cert=None, krb_host=None, kerberos_service_name=None,
+                                auth_cookie_name=None):
+    # TODO: support timeout
+    if timeout is not None:
+        log.error('get_kerberos_http_transport does not support a timeout')
+    if use_ssl:
+        url = 'https://%s:%s/%s' % (host, port, http_path)
+        log.debug('get_kerberos_http_transport url=%s', url)
+        # TODO(#362): Add server authentication with thrift 0.12.
+        transport = ImpalaHttpClient(url, auth_cookie_name=auth_cookie_name)
+    else:
+        url = 'http://%s:%s/%s' % (host, port, http_path)
+        log.debug('get_kerberos_http_transport url=%s', url)
+        transport = ImpalaHttpClient(url, auth_cookie_name=auth_cookie_name)
+
+    if krb_host:
+        kerberos_host = krb_host
+    else:
+        kerberos_host = host
+
+    def get_auth_headers(auth_cookie):
+        if auth_cookie:
+            return {'Cookie': auth_cookie.output(attrs=['value'], header='' ).strip() }
+        else:
+            import kerberos
+            _, krb_context = kerberos.authGSSClientInit("%s@%s" %
+                                (kerberos_service_name, kerberos_host))
+            kerberos.authGSSClientStep(krb_context, "")
+            negotiate_details = kerberos.authGSSClientResponse(krb_context)
+            return {"Authorization": "Negotiate " + negotiate_details}
+
+    transport.setGetCustomHeadersFunc(get_auth_headers)
+    transport.refreshCustomHeaders()
+    return transport
 
 def get_http_transport(host, port, http_path, timeout=None, use_ssl=False,
                        ca_cert=None, auth_mechanism='NOSASL', user=None,

@@ -31,7 +31,7 @@ from impala.interface import Connection, Cursor, _bind_parameters
 from impala.error import (NotSupportedError, OperationalError,
                           ProgrammingError, HiveServer2Error)
 from impala._thrift_api import (
-    get_socket, get_http_transport, get_transport, ImpalaHttpClient,
+    get_socket, get_http_transport, get_kerberos_http_transport, get_transport, ImpalaHttpClient,
     TTransportException, TBinaryProtocol, TOpenSessionReq, TFetchResultsReq,
     TCloseSessionReq, TExecuteStatementReq, TGetInfoReq, TGetInfoType, TTypeId,
     TFetchOrientation, TGetResultSetMetadataReq, TStatusCode, TGetColumnsReq,
@@ -796,7 +796,7 @@ def threaded(func):
 def connect(host, port, timeout=None, use_ssl=False, ca_cert=None,
             user=None, password=None, kerberos_service_name='impala',
             auth_mechanism=None, krb_host=None, use_http_transport=False,
-            http_path=''):
+            http_path='', auth_cookie_name=None):
     log.debug('Connecting to HiveServer2 %s:%s with %s authentication '
               'mechanism', host, port, auth_mechanism)
 
@@ -805,13 +805,20 @@ def connect(host, port, timeout=None, use_ssl=False, ca_cert=None,
         if ca_cert:
             raise NotSupportedError("Server authentication is not supported " +
                                     "with HTTP endpoints")
-        if krb_host:
-            raise NotSupportedError("Kerberos authentication is not " +
-                                    "supported with HTTP endpoints")
-        transport = get_http_transport(host, port, http_path=http_path,
-                                       use_ssl=use_ssl, ca_cert=ca_cert,
-                                       user=user, password=password,
-                                       auth_mechanism=auth_mechanism)
+        # if krb_host:
+        #     raise NotSupportedError("Kerberos authentication is not " +
+        #                             "supported with HTTP endpoints")
+        if auth_mechanism == 'GSSAPI':
+            transport = get_kerberos_http_transport(host, port, http_path=http_path,
+                                                    use_ssl=use_ssl, ca_cert=ca_cert,
+                                                    krb_host=krb_host,
+                                                    kerberos_service_name=kerberos_service_name,
+                                                    auth_cookie_name=auth_cookie_name)
+        else:
+            transport = get_http_transport(host, port, http_path=http_path,
+                                           use_ssl=use_ssl, ca_cert=ca_cert,
+                                           user=user, password=password,
+                                           auth_mechanism=auth_mechanism)
     else:
         sock = get_socket(host, port, use_ssl, ca_cert)
 
