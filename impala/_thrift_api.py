@@ -247,7 +247,7 @@ class ImpalaHttpClient(TTransportBase):
       if 'Set-Cookie' in self.headers:
         cookies = http_cookies.SimpleCookie()
         try:
-          cookies.load(resp.headers['Set-Cookie'])
+          cookies.load(self.headers['Set-Cookie'])
         except:
           return
 
@@ -261,15 +261,15 @@ class ImpalaHttpClient(TTransportBase):
             else:
               try:
                 max_age_sec = int(c['max-age'])
-                self.__auth_cookie_expires = datetime.datetime.now() +
-                    datetime.timedelta(0, max_age_sec)
+                self.__auth_cookie_expires = \
+                    datetime.datetime.now() + datetime.timedelta(0, max_age_sec)
               except:
                 self.__auth_cookie_expires = None
           # TODO: implement support for 'Eexpires' cookie attribute as well.
 
   def getAuthCookie(self):
     if self.__auth_cookie:
-      if self.__auth_cookie_expires and
+      if self.__auth_cookie_expires and \
           self.__auth_cookie_expires <= datetime.datetime.now():
         self.__auth_cookie = None
     return self.__auth_cookie
@@ -384,7 +384,8 @@ def get_socket(host, port, use_ssl, ca_cert):
 
 
 def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=False,
-                                ca_cert=None, krb_host=None, kerberos_service_name=None):
+                                ca_cert=None, krb_host=None, kerberos_service_name=None,
+                                auth_cookie_name=None):
     # TODO: support timeout
     if timeout is not None:
         log.error('get_kerberos_http_transport does not support a timeout')
@@ -392,11 +393,11 @@ def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=Fal
         url = 'https://%s:%s/%s' % (host, port, http_path)
         log.debug('get_kerberos_http_transport url=%s', url)
         # TODO(#362): Add server authentication with thrift 0.12.
-        transport = ImpalaHttpClient(url)
+        transport = ImpalaHttpClient(url, auth_cookie_name=auth_cookie_name)
     else:
         url = 'http://%s:%s/%s' % (host, port, http_path)
         log.debug('get_kerberos_http_transport url=%s', url)
-        transport = ImpalaHttpClient(url)
+        transport = ImpalaHttpClient(url, auth_cookie_name=auth_cookie_name)
 
     if krb_host:
         kerberos_host = krb_host

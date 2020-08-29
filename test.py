@@ -23,7 +23,8 @@ conn = connect(host, test_hive_port,
   kerberos_service_name='hive',
   password='Password@123',
   use_http_transport=True,
-  http_path='cliservice')
+  http_path='cliservice',
+  auth_cookie_name='hive.server2.auth')
 
 cursor = conn.cursor()
 
