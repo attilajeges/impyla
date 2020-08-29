@@ -27,6 +27,7 @@ from io import BytesIO
 
 from six.moves import urllib
 from six.moves import http_client
+from six.moves import http_cookies
 import warnings
 
 import six
@@ -120,7 +121,7 @@ class ImpalaHttpClient(TTransportBase):
   MIN_REQUEST_SIZE_FOR_EXPECT = 1024
 
   def __init__(self, uri_or_host, port=None, path=None, cafile=None, cert_file=None,
-               key_file=None, ssl_context=None):
+               key_file=None, ssl_context=None, auth_cookie_name=None):
     """ImpalaHttpClient supports two different types of construction:
 
     ImpalaHttpClient(host, port, path) - deprecated
@@ -174,6 +175,8 @@ class ImpalaHttpClient(TTransportBase):
       self.proxy_auth = self.basic_proxy_auth_header(parsed)
     else:
       self.realhost = self.realport = self.proxy_auth = None
+    self.__auth_cookie_name = auth_cookie_name
+    self.__auth_cookie = None
     self.__wbuf = BytesIO()
     self.__http = None
     self.__http_response = None
@@ -236,6 +239,19 @@ class ImpalaHttpClient(TTransportBase):
     if self.__get_custom_headers_func:
       self.__custom_headers = self.__get_custom_headers_func()
 
+  def setAuthCookie(self):
+    if self.__auth_cookie_name:
+      if 'Set-Cookie' in self.headers:
+        cookies = http_cookies.SimpleCookie()
+        try:
+          cookies.load(resp.headers['Set-Cookie'])
+          if self.__auth_cookie_name in cookies:
+            c = cookies[self.__auth_cookie_name]
+            if not c['path'] or c['path'] = '/' or c['path'] = self.path
+            self.__auth_cookie = c
+        except:
+          pass
+
   def read(self, sz):
     return self.__http_response.read(sz)
 
@@ -245,7 +261,7 @@ class ImpalaHttpClient(TTransportBase):
   def write(self, buf):
     self.__wbuf.write(buf)
 
-  def flush(self):
+  def flush(self, retrying=False):
     log.debug('ImpalaHttpClient.flush')
     if self.isOpen():
       self.close()
@@ -301,8 +317,16 @@ class ImpalaHttpClient(TTransportBase):
     self.code = self.__http_response.status
     self.message = self.__http_response.reason
     self.headers = self.__http_response.msg
+    self.setAuthCookie()
 
     log.debug('ImpalaHttpClient.flush http_response:\ncode:%s\nmessage:%s\nheaders:%s', self.code, self.message, self.headers)
+
+    # 401 unauthorized response might mean that we tried cookie-based authentication
+    # with an expired coobkie.
+    # Delete the cookie and try again.
+    if self.code == 401 and self.isAuthCookieSet() and not retrying:
+      self.deleteAuthCookie()
+      return self.flush(retrying=True)
 
     if self.code >= 300:
       # Report any http response code that is not 1XX (informational response) or
