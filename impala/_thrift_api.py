@@ -178,7 +178,7 @@ class ImpalaHttpClient(TTransportBase):
     else:
       self.realhost = self.realport = self.proxy_auth = None
     self.__auth_cookie_name = auth_cookie_name
-    self.__auth_cookie_value = None
+    self.__auth_cookie = None
     self.__auth_cookie_expires = None
     self.__wbuf = BytesIO()
     self.__http = None
@@ -255,7 +255,7 @@ class ImpalaHttpClient(TTransportBase):
           c = cookies[self.__auth_cookie_name]
           path = self.path if self.path.startswith('/') else '/%s' % self.path
           if 'path' not in c or not c['path'] or c['path'] == '/' or c['path'] == path:
-            self.__auth_cookie_value = c.value
+            self.__auth_cookie = c
             if 'max-age' not in c or not c['max-age']:
               self.__auth_cookie_expires = None
             else:
@@ -268,14 +268,14 @@ class ImpalaHttpClient(TTransportBase):
           # TODO: implement support for 'Eexpires' cookie attribute as well.
 
   def getAuthCookie(self):
-    if self.__auth_cookie_value:
+    if self.__auth_cookie:
       if self.__auth_cookie_expires and
           self.__auth_cookie_expires <= datetime.datetime.now():
-        self.__auth_cookie_value = None
-    return self.__auth_cookie_value
+        self.__auth_cookie = None
+    return self.__auth_cookie
 
   def deleteAuthCookie(self):
-    self.__auth_cookie_value = None
+    self.__auth_cookie = None
     self.__auth_cookie_expires = None
 
   def read(self, sz):
@@ -405,12 +405,14 @@ def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=Fal
 
     def get_auth_headers(auth_cookie):
         if auth_cookie:
-            return {'Cookie': auth_cookie.key}
-        import kerberos
-        _, krb_context = kerberos.authGSSClientInit("%s@%s" % (kerberos_service_name, kerberos_host)) 
-        kerberos.authGSSClientStep(krb_context, "")
-        negotiate_details = kerberos.authGSSClientResponse(krb_context)
-        return {"Authorization": "Negotiate " + negotiate_details}
+            return {'Cookie': auth_cookie.output(attrs=['value'], header='' ).strip() }
+        else:
+            import kerberos
+            _, krb_context = kerberos.authGSSClientInit("%s@%s" %
+                                (kerberos_service_name, kerberos_host)) 
+            kerberos.authGSSClientStep(krb_context, "")
+            negotiate_details = kerberos.authGSSClientResponse(krb_context)
+            return {"Authorization": "Negotiate " + negotiate_details}
 
     transport.setGetCustomHeadersFunc(get_auth_headers)
     transport.refreshCustomHeaders()
