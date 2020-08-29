@@ -21,6 +21,8 @@
 from __future__ import absolute_import
 
 import base64
+import datetime
+import email.utils as eut
 import getpass
 import os
 from io import BytesIO
@@ -176,7 +178,8 @@ class ImpalaHttpClient(TTransportBase):
     else:
       self.realhost = self.realport = self.proxy_auth = None
     self.__auth_cookie_name = auth_cookie_name
-    self.__auth_cookie = None
+    self.__auth_cookie_value = None
+    self.__auth_cookie_expires = None
     self.__wbuf = BytesIO()
     self.__http = None
     self.__http_response = None
@@ -237,7 +240,7 @@ class ImpalaHttpClient(TTransportBase):
 
   def refreshCustomHeaders(self):
     if self.__get_custom_headers_func:
-      self.__custom_headers = self.__get_custom_headers_func()
+      self.__custom_headers = self.__get_custom_headers_func(self.getAuthCookie())
 
   def setAuthCookie(self):
     if self.__auth_cookie_name:
@@ -245,12 +248,35 @@ class ImpalaHttpClient(TTransportBase):
         cookies = http_cookies.SimpleCookie()
         try:
           cookies.load(resp.headers['Set-Cookie'])
-          if self.__auth_cookie_name in cookies:
-            c = cookies[self.__auth_cookie_name]
-            if not c['path'] or c['path'] = '/' or c['path'] = self.path
-            self.__auth_cookie = c
         except:
-          pass
+          return
+
+        if self.__auth_cookie_name in cookies:
+          c = cookies[self.__auth_cookie_name]
+          path = self.path if self.path.startswith('/') else '/%s' % self.path
+          if 'path' not in c or not c['path'] or c['path'] == '/' or c['path'] == path:
+            self.__auth_cookie_value = c.value
+            if 'max-age' not in c or not c['max-age']:
+              self.__auth_cookie_expires = None
+            else:
+              try:
+                max_age_sec = int(c['max-age'])
+                self.__auth_cookie_expires = datetime.datetime.now() +
+                    datetime.timedelta(0, max_age_sec)
+              except:
+                self.__auth_cookie_expires = None
+          # TODO: implement support for 'Eexpires' cookie attribute as well.
+
+  def getAuthCookie(self):
+    if self.__auth_cookie_value:
+      if self.__auth_cookie_expires and
+          self.__auth_cookie_expires <= datetime.datetime.now():
+        self.__auth_cookie_value = None
+    return self.__auth_cookie_value
+
+  def deleteAuthCookie(self):
+    self.__auth_cookie_value = None
+    self.__auth_cookie_expires = None
 
   def read(self, sz):
     return self.__http_response.read(sz)
@@ -324,7 +350,7 @@ class ImpalaHttpClient(TTransportBase):
     # 401 unauthorized response might mean that we tried cookie-based authentication
     # with an expired coobkie.
     # Delete the cookie and try again.
-    if self.code == 401 and self.isAuthCookieSet() and not retrying:
+    if self.code == 401 and self.getAuthCookie() and not retrying:
       self.deleteAuthCookie()
       return self.flush(retrying=True)
 
@@ -373,16 +399,18 @@ def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=Fal
         transport = ImpalaHttpClient(url)
 
     if krb_host:
-       kerberos_host = krb_host
+        kerberos_host = krb_host
     else:
-       kerberos_host = host
+        kerberos_host = host
 
-    def get_auth_headers():
-      import kerberos
-      _, krb_context = kerberos.authGSSClientInit("%s@%s" % (kerberos_service_name, kerberos_host)) 
-      kerberos.authGSSClientStep(krb_context, "")
-      negotiate_details = kerberos.authGSSClientResponse(krb_context)
-      return {"Authorization": "Negotiate " + negotiate_details}
+    def get_auth_headers(auth_cookie):
+        if auth_cookie:
+            return {'Cookie': auth_cookie.key}
+        import kerberos
+        _, krb_context = kerberos.authGSSClientInit("%s@%s" % (kerberos_service_name, kerberos_host)) 
+        kerberos.authGSSClientStep(krb_context, "")
+        negotiate_details = kerberos.authGSSClientResponse(krb_context)
+        return {"Authorization": "Negotiate " + negotiate_details}
 
     transport.setGetCustomHeadersFunc(get_auth_headers)
     transport.refreshCustomHeaders()
