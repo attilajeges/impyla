@@ -26,6 +26,13 @@ conn = connect(host, test_hive_port,
   http_path='cliservice')
 
 cursor = conn.cursor()
+
 cursor.execute("show databases")
-print cursor.fetchall()
+print 'show databases 1: %s' %  cursor.fetchall()
+
+cursor.execute("show tables")
+print 'show tables 2: %s' %  cursor.fetchall()
+
+cursor.execute("show databases")
+print 'show databases 3: %s' %  cursor.fetchall()
 

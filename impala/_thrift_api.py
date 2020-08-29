@@ -179,6 +179,7 @@ class ImpalaHttpClient(TTransportBase):
     self.__http_response = None
     self.__timeout = None
     self.__custom_headers = None
+    self.__get_custom_headers_func = None
 
   @staticmethod
   def basic_proxy_auth_header(proxy):
@@ -228,6 +229,13 @@ class ImpalaHttpClient(TTransportBase):
   def setCustomHeaders(self, headers):
     self.__custom_headers = headers
 
+  def setGetCustomHeadersFunc(self, func):
+    self.__get_custom_headers_func = func
+
+  def refreshCustomHeaders(self):
+    if self.__get_custom_headers_func:
+      self.__custom_headers = self.__get_custom_headers_func()
+
   def read(self, sz):
     return self.__http_response.read(sz)
 
@@ -270,15 +278,13 @@ class ImpalaHttpClient(TTransportBase):
     if self.using_proxy() and self.scheme == "http" and self.proxy_auth is not None:
       self.__http.putheader("Proxy-Authorization", self.proxy_auth)
 
+    self.refreshCustomHeaders()
     if not self.__custom_headers or 'User-Agent' not in self.__custom_headers:
       user_agent = 'Python/ImpalaHttpClient'
       script = os.path.basename(sys.argv[0])
       if script:
         user_agent = '%s (%s)' % (user_agent, urllib.parse.quote(script))
       self.__http.putheader('User-Agent', user_agent)
-
-    # TODO: Just a test
-    set_kerberos_auth_headers(self, 'hive','attilaj-1.attilaj.root.hwx.site')  
 
     if self.__custom_headers:
       for key, val in six.iteritems(self.__custom_headers):
@@ -346,17 +352,16 @@ def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=Fal
        kerberos_host = krb_host
     else:
        kerberos_host = host
-    return set_kerberos_auth_headers(transport, kerberos_service_name, kerberos_host)
 
-def set_kerberos_auth_headers(transport, kerberos_service_name, kerberos_host):
-    import kerberos
-    _, krb_context = kerberos.authGSSClientInit("%s@%s" % (kerberos_service_name, kerberos_host)) 
-    kerberos.authGSSClientStep(krb_context, "")
+    def get_auth_headers():
+      import kerberos
+      _, krb_context = kerberos.authGSSClientInit("%s@%s" % (kerberos_service_name, kerberos_host)) 
+      kerberos.authGSSClientStep(krb_context, "")
+      negotiate_details = kerberos.authGSSClientResponse(krb_context)
+      return {"Authorization": "Negotiate " + negotiate_details}
 
-    negotiate_details = kerberos.authGSSClientResponse(krb_context)
-    headers = {"Authorization": "Negotiate " + negotiate_details}
-
-    transport.setCustomHeaders(headers)
+    transport.setGetCustomHeadersFunc(get_auth_headers)
+    transport.refreshCustomHeaders()
     return transport
 
 def get_http_transport(host, port, http_path, timeout=None, use_ssl=False,
