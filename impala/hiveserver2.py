@@ -800,18 +800,21 @@ def connect(host, port, timeout=None, use_ssl=False, ca_cert=None,
     log.debug('Connecting to HiveServer2 %s:%s with %s authentication '
               'mechanism', host, port, auth_mechanism)
 
+    if krb_host:
+        kerberos_host = krb_host
+    else:
+        kerberos_host = host
+
     if use_http_transport:
         # TODO(#362): Add server authentication with thrift 0.12.
         if ca_cert:
             raise NotSupportedError("Server authentication is not supported " +
                                     "with HTTP endpoints")
-        # if krb_host:
-        #     raise NotSupportedError("Kerberos authentication is not " +
-        #                             "supported with HTTP endpoints")
+
         if auth_mechanism == 'GSSAPI':
             transport = get_kerberos_http_transport(host, port, http_path=http_path,
                                                     use_ssl=use_ssl, ca_cert=ca_cert,
-                                                    krb_host=krb_host,
+                                                    kerberos_host=kerberos_host,
                                                     kerberos_service_name=kerberos_service_name,
                                                     auth_cookie_name=auth_cookie_name)
         else:
@@ -821,11 +824,6 @@ def connect(host, port, timeout=None, use_ssl=False, ca_cert=None,
                                            auth_mechanism=auth_mechanism)
     else:
         sock = get_socket(host, port, use_ssl, ca_cert)
-
-        if krb_host:
-            kerberos_host = krb_host
-        else:
-            kerberos_host = host
 
         if timeout is not None:
             timeout = timeout * 1000.  # TSocket expects millis

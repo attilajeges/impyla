@@ -80,6 +80,13 @@ def connect(host='localhost', port=21050, database=None, timeout=None,
         `'impala'` by default.
     use_ldap : bool, optional
         Specify `auth_mechanism='LDAP'` instead.
+    use_http_transport: bool optional
+        Specify wether to use http or binary transport.
+    http_path: str, optional
+        Specify the the path to use in the URI when `use_http_transport` is true.
+    auth_cookie_name: str, optional
+        Specify the name of the cookie for cookie-based authentication when
+        `use_http_transport` is true. Currently used for kerberos over http only.
 
         .. deprecated:: 0.11.0
     ldap_user : str, optional

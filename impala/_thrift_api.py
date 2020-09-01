@@ -127,12 +127,14 @@ class ImpalaHttpClient(TTransportBase):
 
     ImpalaHttpClient(host, port, path) - deprecated
     ImpalaHttpClient(uri, [port=<n>, path=<s>, cafile=<filename>, cert_file=<filename>,
-        key_file=<filename>, ssl_context=<context>])
+        key_file=<filename>, ssl_context=<context>, auth_cookie_name=<cookiename>])
 
     Only the second supports https.  To properly authenticate against the server,
     provide the client's identity by specifying cert_file and key_file.  To properly
     authenticate the server, specify either cafile or ssl_context with a CA defined.
     NOTE: if both cafile and ssl_context are defined, ssl_context will override cafile.
+    auth_cookie_name is used to specify the name of the cookie used for cookie-based
+    authentication.
     """
     if port is not None:
       warnings.warn(
@@ -285,7 +287,7 @@ class ImpalaHttpClient(TTransportBase):
   def write(self, buf):
     self.__wbuf.write(buf)
 
-  def flush(self, retrying=False):
+  def flush(self):
     def sendRequestRecvResp(data):
       if self.isOpen():
         self.close()
@@ -352,7 +354,7 @@ class ImpalaHttpClient(TTransportBase):
     # 401 unauthorized response might mean that we tried cookie-based authentication
     # with an expired coobkie.
     # Delete the cookie and try again.
-    if self.code == 401 and self.getAuthCookie() and not retrying:
+    if self.code == 401 and self.getAuthCookie():
       log.debug('Delete auth cookie and then retry')
       self.deleteAuthCookie()
       sendRequestRecvResp(data)
@@ -387,8 +389,8 @@ def get_socket(host, port, use_ssl, ca_cert):
 
 
 def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=False,
-                                ca_cert=None, krb_host=None, kerberos_service_name=None,
-                                auth_cookie_name=None):
+                                ca_cert=None, kerberos_host=None,
+                                kerberos_service_name=None, auth_cookie_name=None):
     # TODO: support timeout
     if timeout is not None:
         log.error('get_kerberos_http_transport does not support a timeout')
@@ -401,11 +403,6 @@ def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=Fal
         url = 'http://%s:%s/%s' % (host, port, http_path)
         log.debug('get_kerberos_http_transport url=%s', url)
         transport = ImpalaHttpClient(url, auth_cookie_name=auth_cookie_name)
-
-    if krb_host:
-        kerberos_host = krb_host
-    else:
-        kerberos_host = host
 
     def get_auth_headers(auth_cookie):
         if auth_cookie:
