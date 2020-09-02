@@ -201,7 +201,6 @@ class ImpalaHttpClient(TTransportBase):
     return self.realhost is not None
 
   def open(self):
-    log.debug('ImpalaHttpClient.open %s // %s : %s' % (self.scheme, self.host, self.port))
     if self.scheme == 'http':
       self.__http = http_client.HTTPConnection(self.host, self.port,
                                                timeout=self.__timeout)
@@ -216,7 +215,6 @@ class ImpalaHttpClient(TTransportBase):
                              {"Proxy-Authorization": self.proxy_auth})
 
   def close(self):
-    log.debug("ImpalaHttpClient.close")
     self.__http.close()
     self.__http = None
     self.__http_response = None
@@ -298,11 +296,8 @@ class ImpalaHttpClient(TTransportBase):
         # need full URL of real host for HTTP proxy here (HTTPS uses CONNECT tunnel)
         self.__http.putrequest('POST', "http://%s:%s%s" %
                                (self.realhost, self.realport, self.path))
-        log.debug('ImpalaHttpClient.flush http_request:\nPOST\nhttp://%s:%s%s' %
-                  (self.realhost, self.realport, self.path))
       else:
         self.__http.putrequest('POST', self.path)
-        log.debug('ImpalaHttpClient.flush http_request:\nPOST\n%s' % self.path)
 
       # Write headers
       self.__http.putheader('Content-Type', 'application/x-thrift')
@@ -332,7 +327,6 @@ class ImpalaHttpClient(TTransportBase):
 
       # Write payload
       self.__http.send(data)
-      log.debug('headers:%s\ndata:%s' % (self.__custom_headers, data))
 
       # Get reply to flush the request
       self.__http_response = self.__http.getresponse()
@@ -340,10 +334,6 @@ class ImpalaHttpClient(TTransportBase):
       self.message = self.__http_response.reason
       self.headers = self.__http_response.msg
       self.setAuthCookie()
-
-      log.debug('ImpalaHttpClient.flush http_response:\ncode:%s\nmessage:%s\nheaders:%s', self.code, self.message, self.headers)
-
-    log.debug('ImpalaHttpClient.flush')
 
     # Pull data out of buffer
     data = self.__wbuf.getvalue()
@@ -355,7 +345,8 @@ class ImpalaHttpClient(TTransportBase):
     # with an expired cookie.
     # Delete the cookie and try again.
     if self.code == 401 and self.getAuthCookie():
-      log.debug('Delete auth cookie and then retry')
+      log.debug('Received "401 Unauthorized" response. '
+                'Delete auth cookie and then retry.')
       self.deleteAuthCookie()
       sendRequestRecvResp(data)
 
