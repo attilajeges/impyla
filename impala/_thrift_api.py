@@ -388,40 +388,10 @@ def get_socket(host, port, use_ssl, ca_cert):
         return TSocket(host, port)
 
 
-def get_kerberos_http_transport(host, port, http_path, timeout=None, use_ssl=False,
-                                ca_cert=None, kerberos_host=None,
-                                kerberos_service_name=None, auth_cookie_name=None):
-    # TODO: support timeout
-    if timeout is not None:
-        log.error('get_kerberos_http_transport does not support a timeout')
-    if use_ssl:
-        url = 'https://%s:%s/%s' % (host, port, http_path)
-        log.debug('get_kerberos_http_transport url=%s', url)
-        # TODO(#362): Add server authentication with thrift 0.12.
-        transport = ImpalaHttpClient(url, auth_cookie_name=auth_cookie_name)
-    else:
-        url = 'http://%s:%s/%s' % (host, port, http_path)
-        log.debug('get_kerberos_http_transport url=%s', url)
-        transport = ImpalaHttpClient(url, auth_cookie_name=auth_cookie_name)
-
-    def get_auth_headers(auth_cookie):
-        if auth_cookie:
-            return {'Cookie': auth_cookie.output(attrs=['value'], header='' ).strip() }
-        else:
-            import kerberos
-            _, krb_context = kerberos.authGSSClientInit("%s@%s" %
-                                (kerberos_service_name, kerberos_host))
-            kerberos.authGSSClientStep(krb_context, "")
-            negotiate_details = kerberos.authGSSClientResponse(krb_context)
-            return {"Authorization": "Negotiate " + negotiate_details}
-
-    transport.setGetCustomHeadersFunc(get_auth_headers)
-    transport.refreshCustomHeaders()
-    return transport
-
 def get_http_transport(host, port, http_path, timeout=None, use_ssl=False,
                        ca_cert=None, auth_mechanism='NOSASL', user=None,
-                       password=None):
+                       password=None, kerberos_host=None, kerberos_service_name=None,
+                       auth_cookie_name=None):
     # TODO: support timeout
     if timeout is not None:
         log.error('get_http_transport does not support a timeout')
@@ -429,14 +399,14 @@ def get_http_transport(host, port, http_path, timeout=None, use_ssl=False,
         url = 'https://%s:%s/%s' % (host, port, http_path)
         log.debug('get_http_transport url=%s', url)
         # TODO(#362): Add server authentication with thrift 0.12.
-        transport = ImpalaHttpClient(url)
+        transport = ImpalaHttpClient(url, auth_cookie_name=auth_cookie_name)
     else:
         url = 'http://%s:%s/%s' % (host, port, http_path)
         log.debug('get_http_transport url=%s', url)
-        transport = ImpalaHttpClient(url)
+        transport = ImpalaHttpClient(url, auth_cookie_name=auth_cookie_name)
 
-    # Set defaults for PLAIN SASL / LDAP connections.
     if auth_mechanism in ['PLAIN', 'LDAP']:
+        # Set defaults for PLAIN SASL / LDAP connections.
         if user is None:
             user = getpass.getuser()
             log.debug('get_http_transport: user=%s', user)
@@ -456,6 +426,22 @@ def get_http_transport(host, port, http_path, timeout=None, use_ssl=False,
             auth = base64.encodestring(user_password).decode().strip('\n')
 
         transport.setCustomHeaders({'Authorization': 'Basic %s' % auth})
+
+    elif auth_mechanism == 'GSSAPI':
+        # For kerberos oveir http we need to dynamically generate custom request headers.
+        def get_auth_headers(auth_cookie):
+            import kerberos
+            if auth_cookie:
+                return {'Cookie': auth_cookie.output(attrs=['value'], header='' ).strip() }
+            else:
+                _, krb_context = kerberos.authGSSClientInit("%s@%s" %
+                                    (kerberos_service_name, kerberos_host))
+                kerberos.authGSSClientStep(krb_context, "")
+                negotiate_details = kerberos.authGSSClientResponse(krb_context)
+                return {"Authorization": "Negotiate " + negotiate_details}
+
+        transport.setGetCustomHeadersFunc(get_auth_headers)
+        transport.refreshCustomHeaders()
 
     return transport
 

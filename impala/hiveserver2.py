@@ -31,7 +31,7 @@ from impala.interface import Connection, Cursor, _bind_parameters
 from impala.error import (NotSupportedError, OperationalError,
                           ProgrammingError, HiveServer2Error)
 from impala._thrift_api import (
-    get_socket, get_http_transport, get_kerberos_http_transport, get_transport, ImpalaHttpClient,
+    get_socket, get_http_transport, get_transport, ImpalaHttpClient,
     TTransportException, TBinaryProtocol, TOpenSessionReq, TFetchResultsReq,
     TCloseSessionReq, TExecuteStatementReq, TGetInfoReq, TGetInfoType, TTypeId,
     TFetchOrientation, TGetResultSetMetadataReq, TStatusCode, TGetColumnsReq,
@@ -811,17 +811,13 @@ def connect(host, port, timeout=None, use_ssl=False, ca_cert=None,
             raise NotSupportedError("Server authentication is not supported " +
                                     "with HTTP endpoints")
 
-        if auth_mechanism == 'GSSAPI':
-            transport = get_kerberos_http_transport(host, port, http_path=http_path,
-                                                    use_ssl=use_ssl, ca_cert=ca_cert,
-                                                    kerberos_host=kerberos_host,
-                                                    kerberos_service_name=kerberos_service_name,
-                                                    auth_cookie_name=auth_cookie_name)
-        else:
-            transport = get_http_transport(host, port, http_path=http_path,
-                                           use_ssl=use_ssl, ca_cert=ca_cert,
-                                           user=user, password=password,
-                                           auth_mechanism=auth_mechanism)
+        transport = get_http_transport(host, port, http_path=http_path,
+                                       use_ssl=use_ssl, ca_cert=ca_cert,
+                                       auth_mechanism=auth_mechanism,
+                                       user=user, password=password,
+                                       kerberos_host=kerberos_host,
+                                       kerberos_service_name=kerberos_service_name,
+                                       auth_cookie_name=auth_cookie_name)
     else:
         sock = get_socket(host, port, use_ssl, ca_cert)
 
