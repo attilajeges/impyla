@@ -1,6 +1,10 @@
 Changelog
 =========
 
+0.16.3
+------
+Same as 0.16a3
+
 0.16a3
 ------
 * **Improvements**
