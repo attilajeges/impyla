@@ -154,12 +154,22 @@ EOF
 
   cd /tmp
 
+  # TODO: remove, for testing only
+  cd /io/local_pip_repo
+  nohup  /opt/python/cp35-cp35m/bin/python -m http.server 9000 &
+  cd /tmp
+
   # Install sdist with different python versions and run sanity_check.
   local sdistfn="$(ls ${SDIST_DIR}/${PKG_NAME}-*.tar.gz)"
   local pydir=""
   for pydir in /opt/python/*; do
     set_up_virt_env "$pydir"
-    pip install --no-cache-dir --no-binary "$PKG_NAME" "${sdistfn}[kerberos]"
+
+    # TODO: remove, for testing onlty
+    pip install --extra-index-url=http://127.0.0.1:9000 \
+                --no-cache-dir --no-binary "$PKG_NAME" "${sdistfn}[kerberos]"
+    # pip install --no-cache-dir --no-binary "$PKG_NAME" "${sdistfn}[kerberos]"
+
     python /tmp/sanity_check.py
     tear_down_virt_env
   done
@@ -168,7 +178,12 @@ EOF
   local whlfn="$(ls ${WHEELHOUSE_DIR}/${PKG_NAME}-*-py2.py3-none-any.whl)"
   for pydir in /opt/python/*; do
     set_up_virt_env "$pydir"
-    pip install --no-cache-dir --only-binary "$PKG_NAME" "${whlfn}[kerberos]"
+
+    # TODO: remove, for testing onlty
+    pip install --extra-index-url=http://127.0.0.1:9000 \
+                --no-cache-dir --only-binary "$PKG_NAME" "${whlfn}[kerberos]"
+    # pip install --no-cache-dir --only-binary "$PKG_NAME" "${whlfn}[kerberos]"
+
     python /tmp/sanity_check.py
     tear_down_virt_env
   done
@@ -178,7 +193,12 @@ EOF
   local py27="/opt/rh/python27/root/usr/bin/python"
   for pkgfn in "$sdistfn" "$whlfn"; do
     set_up_virt_env_py27 "$py27lib" "$py27"
-    LD_LIBRARY_PATH="$py27lib" pip install --no-cache-dir "${pkgfn}[kerberos]"
+
+    # TODO: remove, for testing onlty
+    LD_LIBRARY_PATH="$py27lib" pip install --extra-index-url=http://127.0.0.1:9000 \
+                                           --no-cache-dir "${pkgfn}[kerberos]"
+    # LD_LIBRARY_PATH="$py27lib" pip install --no-cache-dir "${pkgfn}[kerberos]"
+
     LD_LIBRARY_PATH="$py27lib" python /tmp/sanity_check.py
     tear_down_virt_env
   done
