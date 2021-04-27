@@ -21,14 +21,15 @@ yum install -y krb5-libs krb5-devel krb5-server krb5-workstation
 export PATH="/usr/kerberos/bin:$PATH"
 cp -f /io/test_scripts/krb5.conf /etc/
 
-thrift_whl=$(find /io/local_pip_repo/thrift-sasl/ -name "thrift_sasl-*.whl")
-impyla_whl=$(find /io/pip-dists-build/wheelhouse/ -name "impyla-*.whl")
+# thrift_whl=$(find /io/local_pip_repo/thrift-sasl/ -name "thrift_sasl-*.whl")
+# impyla_whl=$(find /io/pip-dists-build/wheelhouse/ -name "impyla-*.whl")
 
 # python3
 export PATH="/opt/python/cp39-cp39/bin:$PATH"
 
-pip install "$thrift_whl"
-pip install "$impyla_whl"[kerberos]
+# pip install --upgrade --upgrade-strategy eager "$thrift_whl"
+# pip install --upgrade --upgrade-strategy eager "$impyla_whl"[kerberos]
+pip install --upgrade --upgrade-strategy eager impyla[kerberos]==0.17a5
 
 python /io/test_scripts/test-hive-py3-plain.py
 python /io/test_scripts/test-impala-py3-nosasl.py
@@ -46,8 +47,9 @@ yum install -y python27
 export PATH="/opt/rh/python27/root/usr/bin:$PATH"
 export LD_LIBRARY_PATH="/opt/rh/python27/root/usr/lib64:$LD_LIBRARY_PATH"
 
-pip install "$thrift_whl"
-pip install "$impyla_whl"[kerberos]
+# pip install "$thrift_whl"
+# pip install "$impyla_whl"[kerberos]
+pip install impyla[kerberos]==0.17a5
 
 python /io/test_scripts/test-hive-py2-plain.py
 python /io/test_scripts/test-impala-py2-nosasl.py
