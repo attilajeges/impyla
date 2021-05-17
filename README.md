@@ -26,16 +26,15 @@ experience
 
 Required:
 
-* Python 2.6+ or 3.3+
+* Python 2.7+ or 3.5+
 
 * `six`, `bitarray`
 
 * `thrift==0.11.0`
 
-Optional:
+* `thrift_sasl==0.4.3
 
-* `thrift_sasl==0.4.2` for hive and/or Kerberos support. This also requires a SASL
-   library to be installed on your system - see [System SASL](#system-sasl)
+Optional:
 
 * `kerberos>=1.3.0` for Kerberos over HTTP support.
 
@@ -45,21 +44,6 @@ Optional:
 
 * `pytest` for running tests; `unittest2` for testing on Python 2.6
 
-
-#### System SASL
-Different systems require different packages to be installed to enable SASL support
-in Impyla. Some examples of how to install the packages on different distributions
-follow.
-
-Ubuntu:
-```bash
-apt-get install libsasl2-dev libsasl2-2 libsasl2-modules-gssapi-mit
-```
-
-RHEL/CentOS:
-```bash
-yum install cyrus-sasl-md5 cyrus-sasl-plain cyrus-sasl-gssapi cyrus-sasl-devel
-```
 
 ### Installation
 
